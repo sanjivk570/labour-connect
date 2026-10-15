@@ -13,6 +13,19 @@
     RewriteCond %{HTTP:x-xsrf-token} .
     RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
 
+    # Remove index.php from URLs: /public/index.php/api/health -> /public/api/health.
+    # 308 (not 301) so POST/PUT/PATCH requests keep their method and body.
+    # Matches on THE_REQUEST (original client request), so internal rewrites never loop.
+    RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s+(/[^\s?]*)/index\.php(/[^\s?]*)?
+    RewriteRule ^index\.php(/|$) %1%2 [R=308,L]
+
+    # Canonical folder case: Windows filesystem is case-insensitive, but Laravel's base-path
+    # stripping is case-sensitive, so /labourConnect/... (any case variant) must redirect to
+    # the real folder name /LabourConnect/... Update this if the project folder is renamed.
+    RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s+/([Ll][Aa][Bb][Oo][Uu][Rr][Cc][Oo][Nn][Nn][Ee][Cc][Tt])(/[^\s?]*)?
+    RewriteCond %{THE_REQUEST} !\s+/LabourConnect[/\s?]
+    RewriteRule .* /LabourConnect%2 [R=308,L]
+
     # Redirect Trailing Slashes If Not A Folder...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_URI} (.+)/$
