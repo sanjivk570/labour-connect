@@ -1,0 +1,524 @@
+{
+  "info": {
+    "name": "LabourConnect API",
+    "description": "Full Postman collection for the LabourConnect Laravel API (modular monolith, Sanctum bearer auth).\n\n**Base URL:** `{{base_url}}` — defaults to `http://localhost:8000` (php artisan serve). If you run it under WAMP, change the variable to `http://localhost/LabourConnect`.\n\n**Response envelope:** `{ success, message, data, meta? }`.\n\n**Flow:** Send OTP → Verify OTP (token auto-saved) → Select Role → use role-protected endpoints.\n\n**Locale:** every endpoint accepts `?locale=en|hi` or `Accept-Language` header.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": { "type": "text/javascript", "exec": [] }
+    },
+    {
+      "listen": "test",
+      "script": { "type": "text/javascript", "exec": [] }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "locale", "value": "en" },
+    { "key": "mobile", "value": "9876543210" },
+    { "key": "otp", "value": "" },
+    { "key": "token", "value": "" },
+    { "key": "categoryId", "value": "1" },
+    { "key": "role", "value": "labour" }
+  ],
+  "item": [
+    {
+      "name": "0. Health & Localization",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/health", "host": ["{{base_url}}"], "path": ["api", "health"] },
+            "description": "Public health endpoint. No auth required."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('App is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Localization Strings",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/localization/strings?locale={{locale}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "localization", "strings"],
+              "query": [{ "key": "locale", "value": "{{locale}}", "description": "en | hi" }]
+            },
+            "description": "All static UI strings for the active locale."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns messages', () => pm.expect(pm.response.json().data.messages).to.be.an('object'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Current User (raw /api/user)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/user", "host": ["{{base_url}}"], "path": ["api", "user"] },
+            "description": "Sanctum-protected default endpoint returning the authenticated user object."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.json().id) { pm.test('Has user id', () => pm.expect(pm.response.json().id).to.be.a('number')); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Auth (OTP / Social / Session)",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/auth/otp", "host": ["{{base_url}}"], "path": ["api", "auth", "otp"] },
+            "description": "Sends a 6-digit OTP (regex /^[6-9]\\d{9}$/). Non-production responses include `debug_otp`, auto-saved to the `otp` variable by this request's test."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.be.true);",
+                  "if (body.data && body.data.debug_otp) {",
+                  "    pm.collectionVariables.set('otp', body.data.debug_otp);",
+                  "    pm.test('debug_otp saved to {{otp}}', () => pm.expect(body.data.debug_otp).to.match(/^\\d{6}$/));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP (login)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"otp\": \"{{otp}}\",\n  \"device_token\": \"fcm-token-xyz\",\n  \"platform\": \"android\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/auth/otp/verify", "host": ["{{base_url}}"], "path": ["api", "auth", "otp", "verify"] },
+            "description": "Verifies the OTP, revokes old tokens, creates the user if new, returns `{ user, access_token, token_type }`. The token is auto-saved to `{{token}}` for every protected request. `device_token` + `platform` (android|ios) optional."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.be.true);",
+                  "pm.test('Returns access_token', () => pm.expect(body.data.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('token', body.data.access_token);",
+                  "pm.collectionVariables.set('user_id', body.data.user.id);",
+                  "if (body.data.user.role) { pm.collectionVariables.set('role', body.data.user.role); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Social Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"google\",\n  \"provider_id\": \"109384759283\",\n  \"locale\": \"en\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/auth/social", "host": ["{{base_url}}"], "path": ["api", "auth", "social"] },
+            "description": "Login via Google/Facebook. Body: `provider` (google|facebook, required), `provider_id` (required), `locale` (en|hi, optional). Token auto-saved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.data && body.data.access_token) {",
+                  "    pm.collectionVariables.set('token', body.data.access_token);",
+                  "    pm.test('access_token saved', () => pm.expect(body.data.access_token).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Select Role",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"{{role}}\",\n  \"locale\": \"en\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/auth/role", "host": ["{{base_url}}"], "path": ["api", "auth", "role"] },
+            "description": "Required once after first login. Body: `role` (customer|labour, required), `locale` (en|hi, optional)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success = true', () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Current User (/auth/me)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/me", "host": ["{{base_url}}"], "path": ["api", "auth", "me"] },
+            "description": "Returns the authenticated user: `{ id, mobile, role, ... }`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has role', () => pm.expect(pm.response.json().data.role).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/logout", "host": ["{{base_url}}"], "path": ["api", "auth", "logout"] },
+            "description": "Revokes the current token and clears the `token` variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.unset('token');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Catalogue (public)",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories?locale={{locale}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories"],
+              "query": [{ "key": "locale", "value": "{{locale}}", "description": "en | hi" }]
+            },
+            "description": "All active labour categories with localised names (`id`, `slug`, `name`, `name_en`, `name_hi`)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "pm.test('Returns array', () => pm.expect(data).to.be.an('array'));",
+                  "if (data.length) { pm.collectionVariables.set('categoryId', data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Skills by Category",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/{{categoryId}}/skills?locale={{locale}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "{{categoryId}}", "skills"],
+              "query": [{ "key": "locale", "value": "{{locale}}" }]
+            },
+            "description": "Active skills for the given category id (must exist in `labour_categories`)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Labour Profile (role: labour)",
+      "item": [
+        {
+          "name": "Get Labour Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/labour/profile", "host": ["{{base_url}}"], "path": ["api", "labour", "profile"] },
+            "description": "Full profile: category, skills, rates, availabilities. 403 when the user's role is not `labour`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Registration Step 1 — Personal",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"full_name\": \"Rahul Kumar\",\n  \"date_of_birth\": \"1995-06-15\",\n  \"age\": 30,\n  \"gender\": \"male\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/1", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "1"] },
+            "description": "Required: `full_name` (max 120), `gender` (male|female|other|prefer_not_to_say). Optional: `date_of_birth` (before today), `age` (14-99)."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Registration Step 2 — Address",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"address_line\": \"12, Gandhi Nagar\",\n  \"city\": \"Sikar\",\n  \"district\": \"Sikar\",\n  \"state\": \"Rajasthan\",\n  \"pincode\": \"332001\",\n  \"latitude\": 27.6094,\n  \"longitude\": 75.1399,\n  \"max_travel_distance_km\": 10\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/2", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "2"] },
+            "description": "Required: `city`, `state`. Optional: `address_line`, `district`, `pincode`, `latitude`, `longitude`, `max_travel_distance_km` (5|10|20|999 — send \"anywhere\" to map to 999)."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Registration Step 3 — Skills",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"labour_category_id\": {{categoryId}},\n  \"skill_ids\": [1, 2],\n  \"primary_skill_id\": 1\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/3", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "3"] },
+            "description": "Required: `labour_category_id` (exists), `skill_ids` array min 1 (each must exist in `skills`). Optional: `primary_skill_id`. Get ids from the Catalogue folder first."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Registration Step 4 — Rates",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"rates\": {\n    \"hour\": 100,\n    \"day\": 700,\n    \"week\": 4000,\n    \"month\": 15000\n  }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/4", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "4"] },
+            "description": "Required: `rates` object (min 1 key). Keys `hour`, `day`, `week`, `month` are optional numeric values > 0."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Registration Step 5 — Weekly Availability",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"availability\": {\n    \"1\": { \"is_available\": true, \"start_time\": \"09:00\", \"end_time\": \"18:00\" },\n    \"2\": { \"is_available\": true, \"start_time\": \"09:00\", \"end_time\": \"18:00\" },\n    \"3\": { \"is_available\": false, \"start_time\": null, \"end_time\": null },\n    \"4\": { \"is_available\": true, \"start_time\": \"09:00\", \"end_time\": \"18:00\" },\n    \"5\": { \"is_available\": true, \"start_time\": \"09:00\", \"end_time\": \"18:00\" },\n    \"6\": { \"is_available\": true, \"start_time\": \"10:00\", \"end_time\": \"16:00\" },\n    \"7\": { \"is_available\": false, \"start_time\": null, \"end_time\": null }\n  }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/5", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "5"] },
+            "description": "Required: `availability` object keyed 1-7 (Mon-Sun). Each entry: `is_available` (boolean, required), `start_time` / `end_time` in H:i (24h); `end_time` must be after `start_time`."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Registration Step 6 — Experience & Bio",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"experience_years\": 5,\n  \"work_type\": \"full_time\",\n  \"bio\": \"Experienced mason available for residential and commercial work.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/registration/step/6", "host": ["{{base_url}}"], "path": ["api", "labour", "registration", "step", "6"] },
+            "description": "Required: `experience_years` (0-80), `work_type` (full_time|part_time|contract). Optional: `bio` (max 2000). Completing this finalises registration."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Toggle Today's Availability",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"is_available_today\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/labour/availability/today", "host": ["{{base_url}}"], "path": ["api", "labour", "availability", "today"] },
+            "description": "Marks the worker available/unavailable for today. Body: `is_available_today` (boolean, required)."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Labour Dashboard",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/labour/dashboard", "host": ["{{base_url}}"], "path": ["api", "labour", "dashboard"] },
+            "description": "Returns `greeting`, `completion_percentage`, `is_available_today`, and the `profile` summary for the worker home screen."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "4. Customer Profile (role: customer)",
+      "item": [
+        {
+          "name": "Get Customer Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/customer/profile", "host": ["{{base_url}}"], "path": ["api", "customer", "profile"] },
+            "description": "Returns `{ id, user_id, full_name, photo_path }` or null when no profile exists yet. 403 if the role is not `customer`."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update Customer Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"full_name\": \"Ravi Sharma\",\n  \"photo_path\": \"uploads/users/1.jpg\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/customer/profile", "host": ["{{base_url}}"], "path": ["api", "customer", "profile"] },
+            "description": "Creates the profile if missing, otherwise updates it. `full_name` required when present (max 120); `photo_path` nullable (max 255)."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "5. Labour Search (public)",
+      "item": [
+        {
+          "name": "Search Labour Workers",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/labour/search?category_id={{categoryId}}&available_today=true&within_km=10&latitude=27.6094&longitude=75.1399&sort=charge_low&per_page=15&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "labour", "search"],
+              "query": [
+                { "key": "query", "value": "", "description": "Keyword on name / category / skill (max 100)" },
+                { "key": "category_id", "value": "{{categoryId}}", "description": "labour_categories.id" },
+                { "key": "skill_ids[]", "value": "", "description": "Repeatable; each must exist in skills", "disabled": true },
+                { "key": "city", "value": "", "disabled": true },
+                { "key": "state", "value": "", "disabled": true },
+                { "key": "latitude", "value": "27.6094" },
+                { "key": "longitude", "value": "75.1399" },
+                { "key": "within_km", "value": "10", "description": "5 | 10 | 20 | 50 (requires lat/lng)" },
+                { "key": "available_today", "value": "true" },
+                { "key": "max_charge", "value": "", "disabled": true, "description": "Numeric > 0" },
+                { "key": "rate_unit", "value": "", "disabled": true, "description": "hour | day | week | month" },
+                { "key": "min_experience", "value": "", "disabled": true, "description": "0-80" },
+                { "key": "sort", "value": "charge_low", "description": "distance | charge_low | charge_high | experience | newest" },
+                { "key": "per_page", "value": "15", "description": "1-50" },
+                { "key": "page", "value": "1" }
+              ]
+            },
+            "description": "Searches completed labour profiles. Response: `{ success, data: [...], meta: { current_page, last_page, per_page, total } }`. Distance sorting needs `latitude`, `longitude` and optionally `within_km`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.be.true);",
+                  "pm.test('Has pagination meta', () => pm.expect(body.meta).to.have.property('total'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
